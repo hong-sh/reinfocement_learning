@@ -1,9 +1,11 @@
+from torch.nn.modules.activation import ReLU
 from agent import Agent
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 
 learning_rate = 0.001
 
@@ -14,9 +16,25 @@ class PPOAgent(Agent):
         self.observation_space = observation_space
         self.action_space = action_space
 
-        self.fc1 = nn.Linear(self.observation_space, 256)
-        self.fc_pi = nn.Linear(256, 2)
-        self.fc_v = nn.Linear(256, 1)
+        self.experience_memory = []
+
+        self.actor = nn.Sequential(
+            nn.Linear(observation_space, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_space),
+            nn.Softmax(dim=-1)
+        )
+
+        self.critic = nn.Sequential(
+            nn.Linear(observation_space, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
 
