@@ -3,7 +3,7 @@ from gym.vector.sync_vector_env import SyncVectorEnv
 import random
 import numpy as np
 
-from algorithm.ppo_agent import PPOAgent
+from agent.ppo_agent import PPOAgent
 
 import torch
 from torch.distributions import Categorical

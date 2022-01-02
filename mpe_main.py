@@ -4,7 +4,7 @@ import gym
 import random
 import numpy as np
 
-import algorithm.ppo_agent as ppo
+import agent.ppo_agent as ppo
 
 def get_action():
     return np.random.randint(0,5)
