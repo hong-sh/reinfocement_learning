@@ -11,7 +11,7 @@ from torch.distributions import Categorical
 T_horizon = 100
 
 if __name__ == "__main__":
-    env = SyncVectorEnv([
+    env = SyncVectorEnv([  
         lambda: gym.make("CartPole-v1"),
         lambda: gym.make("CartPole-v1"),
         lambda: gym.make("CartPole-v1")
@@ -25,11 +25,8 @@ if __name__ == "__main__":
         while not any_done:
             
             for t in range(T_horizon):
-                # for i in range(env.num_envs):
                 actions, action_probs = agent.get_actions(states)
-
                 next_states, rewards, dones, infos = env.step(actions)
-                # print('next_state : {}, action : {}, reward : {}, done : {}, info : {}'.format(next_state, action, reward, done, info))
 
                 for i in range(env.num_envs):
                     agent.save_xps(i, (states[i], next_states[i], actions[i], action_probs[i][actions[i]].item(), rewards[i], dones[i]))
