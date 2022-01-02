@@ -1,5 +1,5 @@
 from torch.nn.modules.activation import ReLU
-from algorithm.agent import Agent
+from agent.agent import Agent
 
 import torch
 import torch.nn as nn
