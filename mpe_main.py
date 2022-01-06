@@ -9,6 +9,8 @@ import agent.ppo_agent as ppo
 def get_action():
     return np.random.randint(0,5)
 
+
+
 if __name__ == "__main__":
     env = simple_tag_v2.env(num_good=3, num_adversaries=3, num_obstacles=2, max_cycles=25, continuous_actions=False)
     env = gym.make('CartPole-v1')

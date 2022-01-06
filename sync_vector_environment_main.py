@@ -43,7 +43,7 @@ if __name__ == "__main__":
             print("{} episode avg score : {:.1f}".format(i_eps+1, score/10))
             score = 0.0
 
-        env.close()
+    env.close()
 
 
 
