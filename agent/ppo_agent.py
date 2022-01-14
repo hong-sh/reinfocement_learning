@@ -91,8 +91,8 @@ class PPOAgent(Agent):
             done_list.append([done])
 
         state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = \
-            torch.tensor(state_list, dtype=torch.float).to(device), torch.tensor(next_state_list, dtype=torch.float).to(device), \
-                torch.tensor(action_list).to(device), torch.tensor(action_prob_list).to(device), torch.tensor(reward_list).to(device), torch.tensor(done_list, dtype=torch.float).to(device)
+            torch.tensor([state_list], dtype=torch.float).to(device), torch.tensor([next_state_list], dtype=torch.float).to(device), \
+                torch.tensor([action_list]).to(device), torch.tensor([action_prob_list]).to(device), torch.tensor([reward_list]).to(device), torch.tensor([done_list], dtype=torch.float).to(device)
         
         self.experience_memory = []
         return state_list, next_state_list, action_list, action_prob_list, reward_list, done_list
