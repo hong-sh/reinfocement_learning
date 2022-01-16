@@ -13,7 +13,7 @@ env_config = {
     "num_good" : 2,
     "num_adversaries" : 3,
     "num_obstacles" : 2,
-    "max_cycles" : 25,
+    "max_cycles" : 100,
     "continuous_actions" : False
 }
 
@@ -33,24 +33,25 @@ if __name__ == "__main__":
         env.reset()
         prev_state = [np.zeros(adversary_observation) for _ in range(env_config["num_adversaries"])]
         step_cnt = 0
+        sum_reward = 0
 
         while step_cnt < env_config["max_cycles"] * sum_of_agents:
             agent_idx = step_cnt % sum_of_agents
             next_state, reward, done, info = env.last()
             if not done:
-                print('step cnt : {}'.format(step_cnt))
-                print('next_state : {}, reward : {}, done : {}, info : {}'.format(next_state, reward, done, info))
+                # print('step cnt : {}'.format(step_cnt))
+                # print('next_state : {}, reward : {}, done : {}, info : {}'.format(next_state, reward, done, info))
                 action = 0
                 if agent_idx < env_config["num_adversaries"]:
                     action, action_prob = adversary_agent.get_action(next_state)
                     adversary_agent.save_xp((prev_state[agent_idx], next_state, action, action_prob[action].item(), reward, done))
                     prev_state[agent_idx] = next_state
+                    sum_reward += reward
                 elif agent_idx >= env_config["num_adversaries"]:
                     action = get_action()
 
                 env.step(action)
-                env.render()
-            else:
-                print('here done')
+                # env.render()
             step_cnt += 1
         adversary_agent.train()
+        print('{} eps total reward : {}'.format(i_eps, sum_reward))
