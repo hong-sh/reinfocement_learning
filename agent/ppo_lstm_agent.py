@@ -34,9 +34,7 @@ class PPOLSTMAgent(Agent):
         self.experience_memory = []
         if num_envs > 1:
             self.experience_memory = [[] for _ in range(num_envs)]
-        
-        self.hidden_buffer = (torch.zeros([1, 1, 32], dtype=torch.float), \
-            torch.zeros([1, 1, 32], dtype=torch.float))
+
         self.fc1 = nn.Linear(observation_space, 64)
         self.lstm = nn.LSTM(64, 32)
         self.fc_pi = nn.Linear(32, action_space)
@@ -46,22 +44,31 @@ class PPOLSTMAgent(Agent):
         self.lstm.to(device)
         self.fc_pi.to(device)
         self.fc_v.to(device)
+        
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-    def get_action(self, state):
+    def get_action(self, state, hidden_in):
         if isinstance(state, np.ndarray):
             state = torch.from_numpy(state).float().to(device)
         x = F.relu(self.fc1(state))
         print(x.size())
         x = x.view(-1, 1, 64)
         print(x.size())
-        x, hidden = self.lstm(x, self.hidden_buffer)
+        x, hidden_out = self.lstm(x, hidden_in)
         x = self.fc_pi(x)
         action_prob = F.softmax(x, dim=-1)
         print(x.size())
         action = (Categorical(action_prob)).sample().item()
-        return action, action_prob.detach(), hidden
-    
+        return action, action_prob.detach(), hidden_out.detach()
+
+    def get_value(self, state, hidden_in):
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state).float().to(device)
+        x = F.relu(self.fc1(state))
+        x = x.view(-1, 1, 64)
+        x, hidden_out = self.lstm(x, hidden_in)
+        value = self.fc_v(x)
+        return value
 
     def get_actions(self, states):
         if isinstance(states, np.ndarray):
