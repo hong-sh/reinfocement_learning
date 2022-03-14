@@ -134,11 +134,13 @@ class PPOAgent(Agent):
 
     def train(self):
         state_batch, next_state_batch, action_batch, action_prob_batch, reward_batch, done_batch = self.make_batch() if self.num_envs == 1 else self.make_batchs()
+        pi_loss, value_loss, td_error = 0.0, 0.0, 0.0
         for i in range(self.num_envs):
             state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = state_batch[i], next_state_batch[i], action_batch[i], action_prob_batch[i], reward_batch[i], done_batch[i]
             td_target = reward_list + gamma * self.critic(next_state_list) * done_list
             delta = td_target - self.critic(state_list)
             delta = delta.detach().cpu().numpy()
+            td_error = np.mean(delta)
 
             advantage_list = []
             advantage = 0.0
@@ -154,8 +156,12 @@ class PPOAgent(Agent):
 
             surr1 = ratio_list * advantage_list
             surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1+eps_clip).to(device) * advantage_list
-            loss = -torch.min(surr1, surr2).to(device) + F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
+            pi_loss = -torch.min(surr1, surr2).to(device)
+            value_loss = F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
+            loss = pi_loss + value_loss
 
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+
+        return pi_loss.mean().detach().cpu().numpy(), value_loss.detach().cpu().numpy(), td_error
