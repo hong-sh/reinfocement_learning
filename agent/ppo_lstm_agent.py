@@ -8,6 +8,7 @@ import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
 
+
 learning_rate = 0.005
 gamma = 0.98
 lmbda = 0.95
@@ -141,6 +142,7 @@ class PPOLSTMAgent(Agent):
 
     def train(self):
         state_batch, next_state_batch, action_batch, action_prob_batch, reward_batch, done_batch = self.make_batch() if self.num_envs == 1 else self.make_batchs()
+
         for i in range(self.num_envs):
             state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = state_batch[i], next_state_batch[i], action_batch[i], action_prob_batch[i], reward_batch[i], done_batch[i]
             td_target = reward_list + gamma * self.critic(next_state_list) * done_list
@@ -164,5 +166,8 @@ class PPOLSTMAgent(Agent):
             loss = -torch.min(surr1, surr2).to(device) + F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
 
             self.optimizer.zero_grad()
-            loss.mean().backward()
+            loss.mean().backward(retain_graph=True)
             self.optimizer.step()
+
+
+        
