@@ -3,8 +3,11 @@ import pettingzoo.mpe.simple_tag_v2 as simple_tag_v2
 import gym
 import random
 import numpy as np
+from time import time_ns
+from tensorboardX import SummaryWriter
 
 from agent.ppo_agent import PPOAgent
+from agent.ppo_lstm_agent import PPOLSTMAgent
 
 def get_action():
     return np.random.randint(0,5)
@@ -17,6 +20,7 @@ env_config = {
     "continuous_actions" : False
 }
 
+
 if __name__ == "__main__":
     env = simple_tag_v2.env(num_good=env_config["num_good"], num_adversaries=env_config["num_adversaries"], \
         num_obstacles=env_config["num_obstacles"], max_cycles=env_config["max_cycles"], \
@@ -26,8 +30,10 @@ if __name__ == "__main__":
     adversary_observation = 4 + (env_config["num_obstacles"] * 2) + (env_config["num_good"] + env_config["num_adversaries"]-1) * 2 + env_config["num_good"] * 2
     good_observation = 4 + (env_config["num_obstacles"] * 2) + (env_config["num_good"] + env_config["num_adversaries"]-1) * 2 + (env_config["num_good"]-1) * 2
 
-    adversary_agent = PPOAgent(adversary_observation , 5)
+    adversary_agent = PPOLSTMAgent(adversary_observation , 5)
     good_agent = PPOAgent(good_observation, 5)
+
+    summary_writer = SummaryWriter('logs/mpe_lstm_main_' + str(time_ns()))
 
     for i_eps in range(10000):
         env.reset()
@@ -54,4 +60,6 @@ if __name__ == "__main__":
                 # env.render()
             step_cnt += 1
         adversary_agent.train()
-        print('{} eps total reward : {}'.format(i_eps, sum_reward))
+        # print('{} eps total reward : {}'.format(i_eps, sum_reward))
+        summary_writer.add_scalar('Episode reward', sum_reward, i_eps)
+
