@@ -16,7 +16,7 @@ env_config = {
     "num_good" : 2,
     "num_adversaries" : 3,
     "num_obstacles" : 2,
-    "max_cycles" : 1000,
+    "max_cycles" : 500,
     "continuous_actions" : False
 }
 
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     adversary_observation = 4 + (env_config["num_obstacles"] * 2) + (env_config["num_good"] + env_config["num_adversaries"]-1) * 2 + env_config["num_good"] * 2
     good_observation = 4 + (env_config["num_obstacles"] * 2) + (env_config["num_good"] + env_config["num_adversaries"]-1) * 2 + (env_config["num_good"]-1) * 2
 
-    adversary_agent = PPOAgent(adversary_observation , 5)
+    adversary_agent = PPOAgent(adversary_observation , 5, env_config["num_adversaries"])
     good_agent = PPOAgent(good_observation, 5)
 
     summary_writer = SummaryWriter('logs/mpe_main_' + str(time_ns()))
@@ -46,12 +46,11 @@ if __name__ == "__main__":
             if not done:
                 # print('step cnt : {}'.format(step_cnt))
                 action = 0
-                if agent_idx < env_config["num_adversaries"]:
+                if agent_idx < env_config["num_adversaries"]: 
                     action, action_prob = adversary_agent.get_action(next_state)
-                    print('agent_idx : {}, prev_state : {}'.format(agent_idx, prev_state[agent_idx])                     )
-                    print('action : {}, next_state : {}, reward : {}, done : {}, info : {}'.format(action, next_state, reward, done, info))
-                    adversary_agent.save_xp((prev_state[agent_idx], next_state, action, action_prob[action].item(), reward, done))
-                    # TODO fix wrong cycles 
+                    # print('agent_idx : {}, prev_state : {}'.format(agent_idx, prev_state[agent_idx]))
+                    # print('action : {}, next_state : {}, reward : {}, done : {}, info : {}'.format(action, next_state, reward, done, info))
+                    adversary_agent.save_xps(agent_idx, (prev_state[agent_idx], next_state, action, action_prob[action].item(), reward, done))
                     prev_state[agent_idx] = next_state
                     sum_reward += reward
                 elif agent_idx >= env_config["num_adversaries"]:
