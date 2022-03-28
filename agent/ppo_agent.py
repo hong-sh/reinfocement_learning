@@ -164,4 +164,4 @@ class PPOAgent(Agent):
             loss.mean().backward()
             self.optimizer.step()
 
-        return pi_loss.mean().detach().cpu().numpy(), value_loss.detach().cpu().numpy(), td_error
+        return loss.mean().detach().cpu().numpy(), pi_loss.mean().detach().cpu().numpy(), value_loss.detach().cpu().numpy(), td_error
