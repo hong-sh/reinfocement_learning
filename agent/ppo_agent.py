@@ -165,3 +165,12 @@ class PPOAgent(Agent):
             self.optimizer.step()
 
         return loss.mean().detach().cpu().numpy(), pi_loss.mean().detach().cpu().numpy(), value_loss.detach().cpu().numpy(), td_error
+
+    def save_model(self, save_dir:str):
+        torch.save(self.actor.state_dict(), save_dir + "_actor.pt")
+        torch.save(self.critic.state_dict(), save_dir + "_critic.pt")
+
+    def load_model(self, load_dir:str):
+        self.actor.load_state_dict(torch.load(load_dir + "_actor.pt"))
+        self.critic.load_state_dict(torch.load(load_dir + "_critic.pt"))
+
