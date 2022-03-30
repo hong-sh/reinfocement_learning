@@ -4,7 +4,7 @@ import pettingzoo.mpe.simple_tag_v2 as simple_tag_v2
 import gym
 import random
 import numpy as np
-from time import time_ns
+from time import time
 from tensorboardX import SummaryWriter
 
 from agent.ppo_agent import PPOAgent
@@ -19,6 +19,10 @@ env_config = {
     "max_cycles" : 50,
     "continuous_actions" : False
 }
+
+time_str = str(time())
+log_dir = 'logs/mpe_main_' + time_str
+model_dir = 'save_model/mpe_main_' + time_str
 
 
 if __name__ == "__main__":
@@ -36,7 +40,7 @@ if __name__ == "__main__":
     adversary_agent = PPOAgent(20 , 5, env_config["num_adversaries"])
     good_agent = PPOAgent(good_observation, 5)
 
-    summary_writer = SummaryWriter('logs/mpe_main_' + str(time_ns()))
+    summary_writer = SummaryWriter(log_dir)
 
     for i_eps in range(10000):
         env.reset()
@@ -74,3 +78,6 @@ if __name__ == "__main__":
         summary_writer.add_scalar('Episode reward', sum_reward, i_eps)
         print('{} eps total reward : {}'.format(i_eps, sum_reward))
 
+        if i_eps % 100 == 0:
+            adversary_agent.save_model(model_dir + '_eps_' + str(i_eps))
+            
