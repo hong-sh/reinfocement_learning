@@ -5,6 +5,7 @@ import gym
 import random
 import numpy as np
 from time import time
+import os
 from tensorboardX import SummaryWriter
 
 from agent.ppo_agent import PPOAgent
@@ -16,13 +17,14 @@ env_config = {
     "num_good" : 2,
     "num_adversaries" : 3,
     "num_obstacles" : 2,
-    "max_cycles" : 50,
+    "max_cycles" : 100,
     "continuous_actions" : False
 }
 
 time_str = str(time())
 log_dir = 'logs/mpe_main_' + time_str
 model_dir = 'save_model/mpe_main_' + time_str
+os.mkdir(model_dir)
 
 
 if __name__ == "__main__":
@@ -30,6 +32,8 @@ if __name__ == "__main__":
         num_obstacles=env_config["num_obstacles"], max_cycles=env_config["max_cycles"], \
             continuous_actions=env_config["continuous_actions"])
     
+    env.seed(12345)
+
     # env = supersuit.normalize_obs_v0(env, env_min=-1, env_max=1)
     # env = supersuit.clip_reward_v0(env, lower_bound=-1, upper_bound=1)
 
@@ -42,9 +46,15 @@ if __name__ == "__main__":
 
     summary_writer = SummaryWriter(log_dir)
 
-    for i_eps in range(10000):
+    i_eps = 0
+    evaluation_mode = False
+    evaluation_step = 0
+    evaluation_avg = 0.0
+
+    while i_eps < 10000:
         env.reset()
         prev_state = [np.zeros(20) for _ in range(env_config["num_adversaries"])]
+        collision = [False for _ in range(env_config["num_good"])]
         step_cnt = 0
         sum_reward = 0
 
@@ -56,6 +66,7 @@ if __name__ == "__main__":
             reward = np.clip(reward, -10, 10) / 10
             if not done:
                 # print('step cnt : {}'.format(step_cnt))
+                # print(env.agent_selection)
                 action = 0
                 if agent_idx < env_config["num_adversaries"]: 
                     action, action_prob = adversary_agent.get_action(next_state)
@@ -65,19 +76,36 @@ if __name__ == "__main__":
                     prev_state[agent_idx] = next_state
                     sum_reward += reward
                 elif agent_idx >= env_config["num_adversaries"]:
-                    action = get_action()
+                    if not collision[agent_idx - env_config["num_adversaries"]] and reward == -1.0:
+                        collision[agent_idx - env_config["num_adversaries"]] = True
+
+                    if collision[agent_idx - env_config["num_adversaries"]]:
+                        action = 0
+                    else:
+                        action = get_action()
 
                 env.step(action)
-                # env.render()
+                if evaluation_mode and evaluation_step == 9:
+                    env.render()
             step_cnt += 1
-        loss, pi_loss, value_loss, td_error =  adversary_agent.train()
-        summary_writer.add_scalar('Loss/total_loss', loss, i_eps)
-        summary_writer.add_scalar('Loss/pi_loss', pi_loss, i_eps)
-        summary_writer.add_scalar('Loss/value_loss', value_loss, i_eps)
-        summary_writer.add_scalar('Loss/td_error', td_error, i_eps)
-        summary_writer.add_scalar('Episode reward', sum_reward, i_eps)
-        print('{} eps total reward : {}'.format(i_eps, sum_reward))
-
+        
+        if not evaluation_mode:
+            loss =  adversary_agent.train()
+            summary_writer.add_scalar('Loss/total_loss', loss, i_eps)
+            i_eps += 1
+        
+        else:
+            evaluation_step += 1
+            evaluation_avg += sum_reward
+            if evaluation_step == 9:
+                # print('{} eps total reward : {}'.format(i_eps, sum_reward))
+                summary_writer.add_scalar('Evaluation/Episode reward avg', evaluation_avg/10, i_eps)
+                evaluation_mode = False
+                evaluation_step = 0
+                evaluation_avg = 0.0
+                i_eps += 1
+        
         if i_eps % 100 == 0:
-            adversary_agent.save_model(model_dir + '_eps_' + str(i_eps))
+            adversary_agent.save_model(model_dir + '/i_eps_' + str(i_eps))
+            evaluation_mode = True
             

@@ -140,7 +140,6 @@ class PPOAgent(Agent):
             td_target = reward_list + gamma * self.critic(next_state_list) * done_list
             delta = td_target - self.critic(state_list)
             delta = delta.detach().cpu().numpy()
-            td_error = np.mean(delta)
 
             advantage_list = []
             advantage = 0.0
@@ -155,16 +154,14 @@ class PPOAgent(Agent):
             ratio_list = torch.exp(torch.log(pi_a_list) - torch.log(action_prob_list)).to(device)
 
             surr1 = ratio_list * advantage_list
-            surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1+eps_clip).to(device) * advantage_list
-            pi_loss = -torch.min(surr1, surr2).to(device)
-            value_loss = F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
-            loss = pi_loss + value_loss
+            surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * advantage_list
+            loss = -torch.min(surr1, surr2).to(device) + F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
 
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
 
-        return loss.mean().detach().cpu().numpy(), pi_loss.mean().detach().cpu().numpy(), value_loss.detach().cpu().numpy(), td_error
+        return loss.mean().detach().cpu().numpy()
 
     def save_model(self, save_dir:str):
         torch.save(self.actor.state_dict(), save_dir + "_actor.pt")
