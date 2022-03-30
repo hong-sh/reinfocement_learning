@@ -13,3 +13,9 @@ class Agent(nn.Module):
 
     def train(self):
         pass
+
+    def save_model(self, save_dir:str):
+        pass
+
+    def load_model(self, load_dir:str):
+        pass
