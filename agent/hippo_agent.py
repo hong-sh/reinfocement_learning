@@ -22,17 +22,14 @@ else:
     print("Device set to : cpu")
 
 class HiPPOAgent(Agent):
-    def __init__(self, observation_space:int, high_level_action_space:int, low_level_action_space:int, num_envs:int=1):
+    def __init__(self, observation_space:int, high_level_action_space:int, low_level_action_space:int):
         super().__init__()
 
         self.observation_space = observation_space
         self.high_level_action_space = high_level_action_space
         self.low_level_action_space = low_level_action_space
-        self.num_envs = num_envs
 
         self.experience_memory = []
-        if num_envs > 1:
-            self.experience_memory = [[] for _ in range(num_envs)]
 
         self.high_level_actor = nn.Sequential(
             nn.Linear(observation_space, 32),
@@ -102,7 +99,34 @@ class HiPPOAgent(Agent):
         return self.curr_high_level_action, self.curr_high_level_action_prob, low_level_action, low_level_action_prob        
 
     def save_xp(self, trajectory:tuple):
-        pass
+        self.experience_memory.append(trajectory)
+
+    def make_batch(self):
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_action_list, l_action_prob_list, l_reward_list, done_list = [], [], [], [], [], [], [], [], []
+
+        for experience in self.experience_memory:
+            state, next_state, h_action, h_action_prob, h_reward, l_action, l_action_prob, l_reward, done = experience
+
+            state_list.append(state)
+            next_state_list.append(next_state)
+            h_action_list.append(h_action)
+            h_action_prob_list.append(h_action_prob)
+            h_reward_list.append([h_reward])
+            l_action_list.append(l_action)
+            l_action_prob_list.append(l_action_prob)
+            l_reward_list.append([l_reward])
+            done_list.append([done])
+
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_action_list, l_action_prob_list, l_reward_list, done_list = \
+            torch.tensor([state_list], dtype=torch.float).to(device), torch.tensor([next_state_list], dtype=torch.float).to(device), \
+                torch.tensor([h_action_list]).to(device), torch.tensor([h_action_prob_list]).to(device), torch.tensor([h_reward_list]).to(device), \
+                    torch.tensor([h_action_list]).to(device), torch.tensor([h_action_prob_list]).to(device), torch.tensor([h_reward_list]).to(device), \
+                        torch.tensor([done_list], dtype=torch.float).to(device)
+        
+        self.experience_memory = []
+        return state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, l_action_list, l_action_prob_list, l_reward_list, done_list
 
     def train(self):
         pass
