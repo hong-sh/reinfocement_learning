@@ -11,4 +11,3 @@
 2. gym==0.21.0
 3. pettingzoo==1.14.0
 4. supersuit==3.3.2
-5. 
