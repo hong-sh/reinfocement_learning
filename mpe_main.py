@@ -17,7 +17,7 @@ env_config = {
     "num_good" : 2,
     "num_adversaries" : 3,
     "num_obstacles" : 2,
-    "max_cycles" : 100,
+    "max_cycles" : 200,
     "continuous_actions" : False
 }
 
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     evaluation_step = 0
     evaluation_avg = 0.0
 
-    while i_eps < 10000:
+    while i_eps < 100000:
         env.reset()
         prev_state = [np.zeros(20) for _ in range(env_config["num_adversaries"])]
         collision = [False for _ in range(env_config["num_good"])]
@@ -85,7 +85,7 @@ if __name__ == "__main__":
                         action = get_action()
 
                 env.step(action)
-                if evaluation_mode and evaluation_step == 9:
+                if evaluation_mode and evaluation_step > 7:
                     env.render()
             step_cnt += 1
         
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         else:
             evaluation_step += 1
             evaluation_avg += sum_reward
-            if evaluation_step == 9:
+            if evaluation_step == 10:
                 # print('{} eps total reward : {}'.format(i_eps, sum_reward))
                 summary_writer.add_scalar('Evaluation/Episode reward avg', evaluation_avg/10, i_eps)
                 evaluation_mode = False
