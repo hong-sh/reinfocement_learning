@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
+from torch.distributions import OneHotCategorical
 
 learning_rate = 0.003
 eps_clip = 0.1
@@ -74,13 +75,31 @@ class HiPPOAgent(Agent):
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
+    def get_high_level_action(self, state:object):
+        action_prob = self.high_level_actor(state)
+        action = OneHotCategorical(action_prob).sample().item()
+        return action, action_prob
+
+    def get_low_level_action(self, state:object, high_level_action:int):
+        state = torch.concat([state, high_level_action])
+        action_prob = self.low_level_actor(state)
+        action = (Categorical(action_prob)).sample().item()
+        return action, action_prob
 
 
     def get_action(self, state:object):
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state).float().to(device)
+
         time_remaining = (self.period - self.count) / self.period
         if self.count % self.period == 0: # sample a new latent skill
+            high_level_action, high_level_action_prob = self.get_high_level_action(state)
+            self.curr_high_level_action = high_level_action
+            self.curr_high_level_action_prob = high_level_action_prob
 
-        pass
+        self.count = (self.count + 1) % self.period
+        low_level_action, low_level_action_prob = self.get_low_level_action(state, self.curr_high_level_action)
+        return self.curr_high_level_action, self.curr_high_level_action_prob, low_level_action, low_level_action_prob        
 
     def save_xp(self, trajectory:tuple):
         pass
