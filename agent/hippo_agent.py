@@ -10,6 +10,10 @@ from torch.distributions import OneHotCategorical
 
 learning_rate = 0.003
 eps_clip = 0.1
+gamma = 0.98
+lmbda = 0.95
+eps_clip = 0.1
+K_epoch = 3
 
 
 device = torch.device('cpu')
@@ -129,7 +133,59 @@ class HiPPOAgent(Agent):
         return state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, l_action_list, l_action_prob_list, l_reward_list, done_list
 
     def train(self):
-        pass
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_action_list, l_action_prob, l_action_prob_list, l_reward_list, done_list = self.make_batch()
+        
+        # high_level policy update
+        h_td_target = h_reward_list + gamma + self.high_level_critic(next_state_list) * done_list
+        h_delta = h_td_target - self.high_level_critic(state_list)
+        h_delta = h_delta.detach().cpu().numpy()
+
+        h_advantage_list = []
+        h_advantage = 0.0
+        for delta_t in h_delta[::-1]:
+            h_advantage = gamma * lmbda * h_advantage + delta_t[0]
+            h_advantage_list.append([h_advantage])
+        h_advantage_list.reverse()
+        h_advantage_list = torch.tensor(h_advantage_list, dtype=torch.float).to(device)
+
+        h_pi_list = self.high_level_actor(state_list)
+        h_pi_a_list = h_pi_list.gather(1, h_action_list)
+        h_ratio_list = torch.exp(torch.log(h_pi_a_list) - torch.log(h_action_prob_list)).to(device)
+
+        h_surr1 = h_ratio_list * h_advantage_list
+        h_surr2 = torch.clamp(h_ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * h_advantage_list
+        h_loss = -torch.min(h_surr1, h_surr2).to(device) + F.smooth_l1_loss(self.high_level_critic(state_list) , h_td_target.detach()).to(device)
+        
+        # low_level policy update
+        l_td_target = l_reward_list + gamma + self.low_level_critic(next_state_list) * done_list
+        l_delta = l_td_target - self.low_level_critic(state_list)
+        l_delta = l_delta.detach().cpu().numpy()
+
+        l_advantage_list = []
+        l_advantage = 0.0
+        for delta_t in l_delta[::-1]:
+            l_advantage = gamma * lmbda * l_advantage + delta_t[0]
+            l_advantage_list.append([l_advantage])
+        l_advantage_list.reverse()
+        l_advantage_list = torch.tensor(l_advantage_list, dtype=torch.float).to(device)
+
+        l_pi_list = self.low_level_actor(state_list)
+        l_pi_a_list = l_pi_list.gather(1, l_action_list)
+        l_ratio_list = torch.exp(torch.log(l_pi_a_list) - torch.log(l_action_prob_list)).to(device)
+
+        l_surr1 = l_ratio_list * l_advantage_list
+        l_surr2 = torch.clamp(l_ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * l_advantage_list
+        l_loss = -torch.min(l_surr1, l_surr2).to(device) + F.smooth_l1_loss(self.low_level_critic(state_list) , l_td_target.detach()).to(device)
+        
+        # TODO calculate average_period
+        loss = h_loss / average_period + l_loss
+
+        self.optimizer.zero_grad()
+        loss.mean().backward()
+        self.optimizer.step()
+
+        loss.mean().detach().cpu().numpy()
 
     def save_model(self, save_dir:str):
         pass
