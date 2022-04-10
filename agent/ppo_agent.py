@@ -134,7 +134,6 @@ class PPOAgent(Agent):
 
     def train(self):
         state_batch, next_state_batch, action_batch, action_prob_batch, reward_batch, done_batch = self.make_batch() if self.num_envs == 1 else self.make_batchs()
-        pi_loss, value_loss, td_error = 0.0, 0.0, 0.0
         for i in range(self.num_envs):
             state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = state_batch[i], next_state_batch[i], action_batch[i], action_prob_batch[i], reward_batch[i], done_batch[i]
             td_target = reward_list + gamma * self.critic(next_state_list) * done_list
