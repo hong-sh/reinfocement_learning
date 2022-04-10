@@ -92,6 +92,7 @@ class HiPPOAgent(Agent):
         if isinstance(state, np.ndarray):
             state = torch.from_numpy(state).float().to(device)
 
+        # TODO how to get period and count
         time_remaining = (self.period - self.count) / self.period
         if self.count % self.period == 0: # sample a new latent skill
             high_level_action, high_level_action_prob = self.get_high_level_action(state)
@@ -188,7 +189,13 @@ class HiPPOAgent(Agent):
         loss.mean().detach().cpu().numpy()
 
     def save_model(self, save_dir:str):
-        pass
+        torch.save(self.high_level_actor.state_dict(), save_dir + "_h_actor.pt")
+        torch.save(self.high_level_critic.state_dict(), save_dir + "_h_critic.pt")
+        torch.save(self.low_level_actor.state_dict(), save_dir + "_l_actor.pt")
+        torch.save(self.low_level_critic.state_dict(), save_dir + "_l_critic.pt")
 
     def load_model(self, load_dir:str):
-        pass
+        self.high_level_actor.load_state_dict(torch.load(load_dir + "_h_actor.pt"))
+        self.high_level_critic.load_state_dict(torch.load(load_dir + "_h_critic.pt"))
+        self.low_level_actor.load_state_dict(torch.load(load_dir + "_l_actor.pt"))
+        self.low_level_critic.load_state_dict(torch.load(load_dir + "_l_critic.pt"))
