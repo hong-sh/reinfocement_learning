@@ -133,4 +133,12 @@ def flat_ppo_run(env:object, log_name:str, num_iter:int):
             flat_ppo_agent.train()
         flat_ppo_sw.add_scalar("Score", score, i+1)
 
-        
+
+if __name__ == "__main__":
+    env = gym.make('CartPole-v1')
+
+    random_hippo_run(env, "random_hippo_plain_lr", 3000, 1, 3)
+    fixed_hippo_run(env, "fixed_hippo_plain", 3000, 1)
+    flat_ppo_run(env, "flat_ppo_plain", 3000)
+
+    env.close()
