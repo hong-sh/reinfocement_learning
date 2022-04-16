@@ -205,7 +205,6 @@ class HiPPOAgent(Agent):
         l_surr2 = torch.clamp(l_ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * l_advantage_list
         l_loss = -torch.min(l_surr1, l_surr2).to(device) + F.smooth_l1_loss(self.low_level_critic(l_state_list) , l_td_target.detach()).to(device)
         
-        # TODO calculate average_period
         loss = h_loss / self.average_period + l_loss
 
         self.optimizer.zero_grad()
