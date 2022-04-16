@@ -108,3 +108,29 @@ def fixed_hippo_run(env:object, log_name:str, num_iter:int, period:int):
         random_hippo_sw.add_scalar("HProb", episode_h_action_probs, i+1)
         random_hippo_sw.add_scalar("LAction", episode_l_action_probs, i+1)
         random_hippo_sw.add_scalar("LReward", episode_l_rewards, i+1)
+
+def flat_ppo_run(env:object, log_name:str, num_iter:int):
+    from agent.ppo_agent import PPOAgent
+    flat_ppo_sw = SummaryWriter('D:\\hong\\git_repo\\reinforcement_learning_algorithms\\logs\\'+ log_name)
+    flat_ppo_agent = PPOAgent(observation_space=4, action_space=2)
+    step = 0
+    for i in range(num_iter):
+        state = env.reset()
+        done = False
+        score = 0.0
+        while not done:
+            for t in range(T_horizon):
+                action, action_prob = flat_ppo_agent.get_action(state)
+                next_state, reward, done, info = env.step(action)
+
+                flat_ppo_agent.save_xp((state, next_state, action, action_prob[action].item(), reward, done))
+
+                state = next_state
+                score += reward
+                if done:
+                    break
+
+            flat_ppo_agent.train()
+        flat_ppo_sw.add_scalar("Score", score, i+1)
+
+        
