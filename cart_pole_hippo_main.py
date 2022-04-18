@@ -57,7 +57,8 @@ def random_hippo_run(env:object, log_name:str, num_iter:int, min_period:int, max
                 if done:
                     break
             hippo_random_agent.train()
-
+        
+        # TT
         random_hippo_sw.add_scalar("Score", score, i+1)
         random_hippo_sw.add_scalar("LScore", l_score, i+1)
         random_hippo_sw.add_scalar("HProb", episode_h_action_probs, i+1)
