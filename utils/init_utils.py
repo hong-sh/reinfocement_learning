@@ -1,43 +1,54 @@
-import numpy as np
+import glob
+import os
+
 import torch
- 
+import torch.nn as nn
+
+
+
+# Get a render function
+def get_render_func(venv):
+    if hasattr(venv, 'envs'):
+        return venv.envs[0].render
+    elif hasattr(venv, 'venv'):
+        return get_render_func(venv.venv)
+    elif hasattr(venv, 'env'):
+        return get_render_func(venv.env)
+
+    return None
+
+# Necessary for my KFAC implementation.
+class AddBias(nn.Module):
+    def __init__(self, bias):
+        super(AddBias, self).__init__()
+        self._bias = nn.Parameter(bias.unsqueeze(1))
+
+    def forward(self, x):
+        if x.dim() == 2:
+            bias = self._bias.t().view(1, -1)
+        else:
+            bias = self._bias.t().view(1, -1, 1, 1)
+
+        return x + bias
+
+
+def update_linear_schedule(optimizer, epoch, total_num_epochs, initial_lr):
+    """Decreases the learning rate linearly"""
+    lr = initial_lr - (initial_lr * (epoch / float(total_num_epochs)))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
 
 def init(module, weight_init, bias_init, gain=1):
     weight_init(module.weight.data, gain=gain)
     bias_init(module.bias.data)
     return module
 
-def weight_init(m):
-    classname = m.__class__.__name__
 
-    if classname.find('Conv') != -1 or classname.find('Linear') != -1:
-        orthogonal(m.weight.data)
-    
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-
-def orthogonal(tensor, gain = 1):
-    if tensor.ndimension() < 2:
-        raise ValueError("Only tensors with 2 or more dimensions are suppored")
-    
-    rows = tensor.size(0)
-    cols = tensor[0].numel()
-
-    flattened = torch.Tensor(rows, cols).normal_(0, 1)
-
-    if rows < cols:
-        flattened.t_()
-
-
-    q, r = torch.qr(flattened)
-    d = torch.diag(r, 0)
-    ph = d.sign()
-
-    q *= ph.expand_as(q)
-
-    if rows < cols:
-        q.t_()
-
-    tensor.view_as(q).copy_(q)
-    tensor.mul_(gain)
-    return tensor
+def cleanup_log_dir(log_dir):
+    try:
+        os.makedirs(log_dir)
+    except OSError:
+        files = glob.glob(os.path.join(log_dir, '*.monitor.csv'))
+        for f in files:
+            os.remove(f)
