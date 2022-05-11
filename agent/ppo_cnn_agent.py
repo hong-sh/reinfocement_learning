@@ -3,9 +3,10 @@ from agent.agent import Agent
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.distributions.categorical as Categorical
 import torch.optim as optim
 import numpy as np
+
+from utils.distributions import Categorical
 
 learning_rate = 0.005
 gamma = 0.98
@@ -36,7 +37,7 @@ class PPOCNNAgent(Agent):
         self.conv3 = nn.Conv2d(64, 32, 3, stride=1)
         self.fc = nn.Linear(32*7*7, 512)
         self.fc_v = nn.Linear(512, 1)
-        self.fc_pi = nn.Linear(512, action_space)
+        self.fc_pi = Categorical(512, action_space)
 
         self.conv1.to(device)
         self.conv2.to(device)
@@ -54,23 +55,23 @@ class PPOCNNAgent(Agent):
         x = F.relu(self.fc(x))
 
         value = self.fc_v(x)
-
         return value, x
 
     def get_pi(self, x):
-        x = self.fc_pi(x)
-        action_dist = Categorical(x)
-        
+        dist = self.fc_pi(x)
+        action = dist.sample()
+        action_log_probs = dist.log_probs(action)
+        dist_entropy = dist.entropy().mean()
+        return action, action_log_probs, dist_entropy
 
     def get_action(self, state):
         if isinstance(state, np.ndarray):
             state = torch.from_numpy(state).float().to(device)
 
         value, x = self.get_value(state)
+        action, action_log_probs, dist_entropy = self.get_pi(x)
 
-        action_prob = self.fc_pi(state)
-        action = (Categorical(action_prob)).sample().item()
-        return action, action_prob.detach()
+        return action, action_log_probs, dist_entropy
 
     def save_xp(self, trajectory:tuple):
         self.experience_memory.append(trajectory)
