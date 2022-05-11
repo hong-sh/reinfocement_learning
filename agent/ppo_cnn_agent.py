@@ -1,96 +1,135 @@
+from agent.agent import Agent
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributions.categorical as Categorical
 import torch.optim as optim
+import numpy as np
 
+learning_rate = 0.005
+gamma = 0.98
+lmbda = 0.95
+eps_clip = 0.1
+K_epoch = 3
 
-class PPO():
-    def __init__(self,
-                 actor_critic,
-                 clip_param,
-                 ppo_epoch,
-                 num_mini_batch,
-                 value_loss_coef,
-                 entropy_coef,
-                 lr=None,
-                 eps=None,
-                 max_grad_norm=None,
-                 use_clipped_value_loss=True):
+device = torch.device('cpu')
 
-        self.actor_critic = actor_critic
+if(torch.cuda.is_available()): 
+    device = torch.device('cuda:0') 
+    torch.cuda.empty_cache()
+    print("Device set to : " + str(torch.cuda.get_device_name(device)))
+else:
+    print("Device set to : cpu")
 
-        self.clip_param = clip_param
-        self.ppo_epoch = ppo_epoch
-        self.num_mini_batch = num_mini_batch
+class PPOCNNAgent(Agent):
+    def __init__(self, num_inputs:int, action_space:int):
+        super().__init__()
 
-        self.value_loss_coef = value_loss_coef
-        self.entropy_coef = entropy_coef
+        self.num_inputs = num_inputs
+        self.action_space = action_space
 
-        self.max_grad_norm = max_grad_norm
-        self.use_clipped_value_loss = use_clipped_value_loss
+        self.experience_memory = []
 
-        self.optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps)
+        self.conv1 = nn.Conv2d(num_inputs, 32, 8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
+        self.conv3 = nn.Conv2d(64, 32, 3, stride=1)
+        self.fc = nn.Linear(32*7*7, 512)
+        self.fc_v = nn.Linear(512, 1)
+        self.fc_pi = nn.Linear(512, action_space)
 
-    def update(self, rollouts):
-        advantages = rollouts.returns[:-1] - rollouts.value_preds[:-1]
-        advantages = (advantages - advantages.mean()) / (
-            advantages.std() + 1e-5)
+        self.conv1.to(device)
+        self.conv2.to(device)
+        self.conv3.to(device)
+        self.fc.to(device)
+        self.fc_v.to(device)
+        self.fc_pi.to(device)
 
-        value_loss_epoch = 0
-        action_loss_epoch = 0
-        dist_entropy_epoch = 0
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-        for e in range(self.ppo_epoch):
-            if self.actor_critic.is_recurrent:
-                data_generator = rollouts.recurrent_generator(
-                    advantages, self.num_mini_batch)
-            else:
-                data_generator = rollouts.feed_forward_generator(
-                    advantages, self.num_mini_batch)
+    def get_value(self, x):
+        x = F.relu(self.conv1(x / 255.))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.fc(x))
 
-            for sample in data_generator:
-                obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                   value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
-                        adv_targ = sample
+        value = self.fc_v(x)
 
-                # Reshape to do in a single forward pass for all steps
-                values, action_log_probs, dist_entropy, _ = self.actor_critic.evaluate_actions(
-                    obs_batch, recurrent_hidden_states_batch, masks_batch,
-                    actions_batch)
+        return value, x
 
-                ratio = torch.exp(action_log_probs -
-                                  old_action_log_probs_batch)
-                surr1 = ratio * adv_targ
-                surr2 = torch.clamp(ratio, 1.0 - self.clip_param,
-                                    1.0 + self.clip_param) * adv_targ
-                action_loss = -torch.min(surr1, surr2).mean()
+    def get_pi(self, x):
+        x = self.fc_pi(x)
+        action_dist = Categorical(x)
+        
 
-                if self.use_clipped_value_loss:
-                    value_pred_clipped = value_preds_batch + \
-                        (values - value_preds_batch).clamp(-self.clip_param, self.clip_param)
-                    value_losses = (values - return_batch).pow(2)
-                    value_losses_clipped = (
-                        value_pred_clipped - return_batch).pow(2)
-                    value_loss = 0.5 * torch.max(value_losses,
-                                                 value_losses_clipped).mean()
-                else:
-                    value_loss = 0.5 * (return_batch - values).pow(2).mean()
+    def get_action(self, state):
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state).float().to(device)
 
-                self.optimizer.zero_grad()
-                (value_loss * self.value_loss_coef + action_loss -
-                 dist_entropy * self.entropy_coef).backward()
-                nn.utils.clip_grad_norm_(self.actor_critic.parameters(),
-                                         self.max_grad_norm)
-                self.optimizer.step()
+        value, x = self.get_value(state)
 
-                value_loss_epoch += value_loss.item()
-                action_loss_epoch += action_loss.item()
-                dist_entropy_epoch += dist_entropy.item()
+        action_prob = self.fc_pi(state)
+        action = (Categorical(action_prob)).sample().item()
+        return action, action_prob.detach()
 
-        num_updates = self.ppo_epoch * self.num_mini_batch
+    def save_xp(self, trajectory:tuple):
+        self.experience_memory.append(trajectory)
 
-        value_loss_epoch /= num_updates
-        action_loss_epoch /= num_updates
-        dist_entropy_epoch /= num_updates
+    def make_batch(self):
+        state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = [], [], [], [], [], []
+        for experience in self.experience_memory:
+            state, next_state, action, action_prob, reward, done = experience
 
-        return value_loss_epoch, action_loss_epoch, dist_entropy_epoch
+            state_list.append(state)
+            next_state_list.append(next_state)
+            action_list.append([action])
+            action_prob_list.append([action_prob])
+            reward_list.append([reward])
+            done = 0 if done else 1
+            done_list.append([done])
+
+        state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = \
+            torch.tensor([state_list], dtype=torch.float).to(device), torch.tensor([next_state_list], dtype=torch.float).to(device), \
+                torch.tensor([action_list]).to(device), torch.tensor([action_prob_list]).to(device), torch.tensor([reward_list]).to(device), torch.tensor([done_list], dtype=torch.float).to(device)
+        
+        self.experience_memory = []
+        return state_list, next_state_list, action_list, action_prob_list, reward_list, done_list
+
+    def train(self):
+        state_batch, next_state_batch, action_batch, action_prob_batch, reward_batch, done_batch = self.make_batch() if self.num_envs == 1 else self.make_batchs()
+        for i in range(self.num_envs):
+            state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = state_batch[i], next_state_batch[i], action_batch[i], action_prob_batch[i], reward_batch[i], done_batch[i]
+            td_target = reward_list + gamma * self.critic(next_state_list) * done_list
+            delta = td_target - self.critic(state_list)
+            delta = delta.detach().cpu().numpy()
+
+            advantage_list = []
+            advantage = 0.0
+            for delta_t in delta[::-1]:
+                advantage = gamma * lmbda * advantage + delta_t[0]
+                advantage_list.append([advantage])
+            advantage_list.reverse()
+            advantage_list = torch.tensor(advantage_list, dtype=torch.float).to(device)
+
+            pi_list = self.actor(state_list)
+            pi_a_list = pi_list.gather(1, action_list)
+            ratio_list = torch.exp(torch.log(pi_a_list) - torch.log(action_prob_list)).to(device)
+
+            surr1 = ratio_list * advantage_list
+            surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * advantage_list
+            loss = -torch.min(surr1, surr2).to(device) + F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
+
+            self.optimizer.zero_grad()
+            loss.mean().backward()
+            self.optimizer.step()
+
+        return loss.mean().detach().cpu().numpy()
+
+    def save_model(self, save_dir:str):
+        torch.save(self.actor.state_dict(), save_dir + "_actor.pt")
+        torch.save(self.critic.state_dict(), save_dir + "_critic.pt")
+
+    def load_model(self, load_dir:str):
+        self.actor.load_state_dict(torch.load(load_dir + "_actor.pt"))
+        self.critic.load_state_dict(torch.load(load_dir + "_critic.pt"))
+

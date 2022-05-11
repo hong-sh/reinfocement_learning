@@ -14,7 +14,7 @@ import torch.optim as optim
 from utils.arguments import get_args
 from model.model import Policy
 from utils.storage import RolloutStorage
-from utils.atari_wrappers import wrap_deepmind
+from utils.atari_wrappers import wrap_deepmind, make_atari
 
 from agent.ppo_cnn_agent import PPO
 from utils.init_utils import *
@@ -38,7 +38,8 @@ def main():
     # envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
     #                      args.gamma, args.log_dir, device, False)
 
-    envs = gym.make("BreakoutNoFrameskip-v4")
+    # envs = gym.make("BreakoutNoFrameskip-v4")
+    envs = make_atari("BreakoutNoFrameskip-v4")
     envs = wrap_deepmind(envs)
 
     actor_critic = Policy(
@@ -63,7 +64,7 @@ def main():
                               actor_critic.recurrent_hidden_state_size)
 
     obs = envs.reset()
-    rollouts.obs[0].copy_(torch.tensor(np.array(obs)))
+    rollouts.obs[0].copy_(torch.tensor(obs))
     rollouts.to(device)
 
     episode_rewards = deque(maxlen=10)
