@@ -27,7 +27,7 @@ class PPOCNNAgent(Agent):
     def __init__(self, num_inputs:int, action_space:int):
         super().__init__()
 
-        self.num_inputs = num_inputs
+        self.num_inputs = num_inputs  
         self.action_space = action_space
 
         self.experience_memory = []
