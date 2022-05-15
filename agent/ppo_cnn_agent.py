@@ -71,7 +71,14 @@ class PPOCNNAgent(Agent):
         value, x = self.get_value(state)
         action, action_log_probs, dist_entropy = self.get_pi(x)
 
-        return action, action_log_probs, dist_entropy
+        return action, action_log_probs
+
+    def evaluate_actions(self, states, actions):
+        value, x = self.get_value(states)
+        dist = self.fc_pi(x)
+        action_log_probs = dist.log_probs(actions)
+        dist_entropy = dist.entropy().mean()
+        return value, action_log_probs, dist_entropy
 
     def save_xp(self, trajectory:tuple):
         self.experience_memory.append(trajectory)
@@ -90,39 +97,39 @@ class PPOCNNAgent(Agent):
             done_list.append([done])
 
         state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = \
-            torch.tensor([state_list], dtype=torch.float).to(device), torch.tensor([next_state_list], dtype=torch.float).to(device), \
-                torch.tensor([action_list]).to(device), torch.tensor([action_prob_list]).to(device), torch.tensor([reward_list]).to(device), torch.tensor([done_list], dtype=torch.float).to(device)
+            torch.tensor(state_list, dtype=torch.float).to(device), torch.tensor(next_state_list, dtype=torch.float).to(device), \
+                torch.tensor(action_list).to(device), torch.tensor(action_prob_list).to(device), torch.tensor(reward_list).to(device), torch.tensor(done_list, dtype=torch.float).to(device)
         
         self.experience_memory = []
         return state_list, next_state_list, action_list, action_prob_list, reward_list, done_list
 
     def train(self):
-        state_batch, next_state_batch, action_batch, action_prob_batch, reward_batch, done_batch = self.make_batch() if self.num_envs == 1 else self.make_batchs()
-        for i in range(self.num_envs):
-            state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = state_batch[i], next_state_batch[i], action_batch[i], action_prob_batch[i], reward_batch[i], done_batch[i]
-            td_target = reward_list + gamma * self.critic(next_state_list) * done_list
-            delta = td_target - self.critic(state_list)
-            delta = delta.detach().cpu().numpy()
+        state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = self.make_batch()
 
-            advantage_list = []
-            advantage = 0.0
-            for delta_t in delta[::-1]:
-                advantage = gamma * lmbda * advantage + delta_t[0]
-                advantage_list.append([advantage])
-            advantage_list.reverse()
-            advantage_list = torch.tensor(advantage_list, dtype=torch.float).to(device)
+        value_next, _ = self.get_value(next_state_list)
+        value, action_log_probs, dist_entropy = self.evaluate_actions(state_list, action_list)
 
-            pi_list = self.actor(state_list)
-            pi_a_list = pi_list.gather(1, action_list)
-            ratio_list = torch.exp(torch.log(pi_a_list) - torch.log(action_prob_list)).to(device)
+        td_target = reward_list + gamma * value_next * done_list
+        delta = td_target - value
+        delta = delta.detach().cpu().numpy()
 
-            surr1 = ratio_list * advantage_list
-            surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * advantage_list
-            loss = -torch.min(surr1, surr2).to(device) + F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
+        advantage_list = []
+        advantage = 0.0
+        for delta_t in delta[::-1]:
+            advantage = gamma * lmbda * advantage + delta_t[0]
+            advantage_list.append([advantage])
+        advantage_list.reverse()
+        advantage_list = torch.tensor(advantage_list, dtype=torch.float).to(device)
 
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            self.optimizer.step()
+        ratio_list = torch.exp(torch.log(action_log_probs) - torch.log(action_prob_list)).to(device)
+
+        surr1 = ratio_list * advantage_list
+        surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * advantage_list
+        loss = -torch.min(surr1, surr2).to(device) + F.smooth_l1_loss(self.critic(state_list) , td_target.detach()).to(device)
+
+        self.optimizer.zero_grad()
+        loss.mean().backward()
+        self.optimizer.step()
 
         return loss.mean().detach().cpu().numpy()
 
