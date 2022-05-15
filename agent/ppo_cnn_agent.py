@@ -9,7 +9,7 @@ import numpy as np
 from utils.distributions import Categorical
 from utils.init_utils import init
 
-learning_rate = 5e-3
+learning_rate = 5e-4
 gamma = 0.98
 lmbda = 0.95
 eps_clip = 0.1

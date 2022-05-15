@@ -34,6 +34,7 @@ if __name__ == "__main__":
         while not done:
             for t in range(T_horizon):
                 action, action_probs = agent.get_action(state)
+                # summary_writer.add_scalar('Episode/action', action, global_step)
                 next_state, reward, done, info = env.step(action)
                 next_state = np.asarray(next_state)
                 next_state = next_state.transpose((2, 0, 1))
