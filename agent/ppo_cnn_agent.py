@@ -9,14 +9,14 @@ import numpy as np
 from utils.distributions import Categorical
 from utils.init_utils import init
 
-learning_rate = 7e-4
+learning_rate = 5e-3
 gamma = 0.98
 lmbda = 0.95
 eps_clip = 0.1
 entropy_coef = 0.001
 value_clip = 0.2
 value_loss_coef = 0.5
-K_epoch = 3
+K_epoch = 4
 max_grad_norm = 0.05
 
 device = torch.device('cpu')
@@ -117,6 +117,7 @@ class PPOCNNAgent(Agent):
         state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = self.make_batch()
 
         pi_loss_mean, value_loss_mean, dist_entropy_mean = 0.0, 0.0, 0.0
+        approx_kl_mean, approx_ent_mean, clipfrac_mean = 0.0, 0.0, 0.0
 
         for _ in range(K_epoch):
             value_next, _ = self.get_v(next_state_list)
@@ -146,26 +147,33 @@ class PPOCNNAgent(Agent):
             value_losses_clipped = (value_pred_clipped - td_target).pow(2)
             value_loss = 0.5 * torch.max(value_losses, value_losses_clipped).mean()
 
-            approx_kl = ratio_list.mean()
-            approx_kl = tf.reduce_mean(logp_old_ph - logp)      # a sample estimate for KL-divergence, easy to compute
-            approx_ent = tf.reduce_mean(-logp)                  # a sample estimate for entropy, also easy to compute
-            clipped = tf.logical_or(ratio > (1+clip_ratio), ratio < (1-clip_ratio))
-            clipfrac = tf.reduce_mean(tf.cast(clipped, tf.float32))
-
             self.optimizer.zero_grad()
             (value_loss * value_loss_coef + pi_loss - dist_entropy * entropy_coef).backward()
             nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
             self.optimizer.step()
 
-            pi_loss_mean = pi_loss.item()
-            value_loss_mean = value_loss.item()
-            dist_entropy_mean = dist_entropy.item()
+            pi_loss_mean += pi_loss.item()
+            value_loss_mean += value_loss.item()
+            dist_entropy_mean += dist_entropy.item()
+
+            approx_kl = ratio_list.mean()
+            approx_ent = (-action_prob_list).mean()
+            clipped = torch.where(torch.abs(ratio_list - 1.0) > eps_clip)
+            clipfrac = len(clipped) / len(ratio_list)
+
+            approx_kl_mean += approx_kl
+            approx_ent_mean += approx_ent
+            clipfrac_mean += clipfrac
 
         pi_loss_mean /= K_epoch
         value_loss_mean /= K_epoch
         dist_entropy_mean /= K_epoch
 
-        return pi_loss_mean, value_loss_mean, dist_entropy_mean
+        approx_kl_mean /= K_epoch
+        approx_ent_mean /= K_epoch
+        clipfrac_mean /= K_epoch
+
+        return pi_loss_mean, value_loss_mean, dist_entropy_mean, approx_kl_mean, approx_ent_mean, clipfrac_mean
 
     def save_model(self, save_dir:str):
         pass
