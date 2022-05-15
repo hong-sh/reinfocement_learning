@@ -9,13 +9,13 @@ import numpy as np
 from utils.distributions import Categorical
 from utils.init_utils import init
 
-learning_rate = 0.005
+learning_rate = 7e-4
 gamma = 0.98
 lmbda = 0.95
 eps_clip = 0.1
 entropy_coef = 0.001
-value_clip = 0.1
-value_loss_coef = 0.001
+value_clip = 0.2
+value_loss_coef = 0.5
 K_epoch = 3
 max_grad_norm = 0.05
 
@@ -54,13 +54,13 @@ class PPOCNNAgent(Agent):
         self.to(device)
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-        self.train()
+        # self.train()
 
-    def get_value(self, x):
+    def get_v(self, x):
         x = F.relu(self.conv1(x / 255.))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
-        x = F.relu(self.fc(x))
+        x = F.relu(self.fc(x.view(x.size(0), -1)))
 
         value = self.fc_v(x)
         return value, x
@@ -76,14 +76,15 @@ class PPOCNNAgent(Agent):
         with torch.no_grad():
             if isinstance(state, np.ndarray):
                 state = torch.from_numpy(state).float().to(device)
+                state = state.unsqueeze(0)
 
-            value, x = self.get_value(state)
+            value, x = self.get_v(state)
             action, action_log_probs, dist_entropy = self.get_pi(x)
 
-        return action, action_log_probs
+        return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
 
     def evaluate_actions(self, states, actions):
-        value, x = self.get_value(states)
+        value, x = self.get_v(states)
         dist = self.fc_pi(x)
         action_log_probs = dist.log_probs(actions)
         dist_entropy = dist.entropy().mean()
@@ -100,7 +101,7 @@ class PPOCNNAgent(Agent):
             state_list.append(state)
             next_state_list.append(next_state)
             action_list.append([action])
-            action_prob_list.append(action_prob)
+            action_prob_list.append([action_prob])
             reward_list.append([reward])
             done = 0 if done else 1
             done_list.append([done])
@@ -118,7 +119,7 @@ class PPOCNNAgent(Agent):
         pi_loss_mean, value_loss_mean, dist_entropy_mean = 0.0, 0.0, 0.0
 
         for _ in range(K_epoch):
-            value_next, _ = self.get_value(next_state_list)
+            value_next, _ = self.get_v(next_state_list)
             value, action_log_probs, dist_entropy = self.evaluate_actions(state_list, action_list)
 
             td_target = reward_list + gamma * value_next * done_list
@@ -133,7 +134,7 @@ class PPOCNNAgent(Agent):
             advantage_list.reverse()
             advantage_list = torch.tensor(advantage_list, dtype=torch.float).to(device)
 
-            ratio_list = torch.exp(torch.log(action_log_probs) - torch.log(action_prob_list)).to(device)
+            ratio_list = torch.exp(action_log_probs - action_prob_list).to(device)
 
             surr1 = ratio_list * advantage_list
             surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * advantage_list
@@ -145,13 +146,19 @@ class PPOCNNAgent(Agent):
             value_losses_clipped = (value_pred_clipped - td_target).pow(2)
             value_loss = 0.5 * torch.max(value_losses, value_losses_clipped).mean()
 
+            approx_kl = ratio_list.mean()
+            approx_kl = tf.reduce_mean(logp_old_ph - logp)      # a sample estimate for KL-divergence, easy to compute
+            approx_ent = tf.reduce_mean(-logp)                  # a sample estimate for entropy, also easy to compute
+            clipped = tf.logical_or(ratio > (1+clip_ratio), ratio < (1-clip_ratio))
+            clipfrac = tf.reduce_mean(tf.cast(clipped, tf.float32))
+
             self.optimizer.zero_grad()
             (value_loss * value_loss_coef + pi_loss - dist_entropy * entropy_coef).backward()
             nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
             self.optimizer.step()
 
             pi_loss_mean = pi_loss.item()
-            value_loss_mean = value_loss.itme()
+            value_loss_mean = value_loss.item()
             dist_entropy_mean = dist_entropy.item()
 
         pi_loss_mean /= K_epoch

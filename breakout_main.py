@@ -1,145 +1,66 @@
-import copy
-import glob
-import os
-import time
-from collections import deque
-
 import gym
+import os
+from time import time
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
 
-from utils.arguments import get_args
-from model.model import Policy
-from utils.storage import RolloutStorage
-from utils.atari_wrappers import wrap_deepmind, make_atari
+from agent.ppo_cnn_agent import PPOCNNAgent
+from tensorboardX import SummaryWriter
+from utils.atari_wrappers import make_env
 
-from agent.ppo_cnn_agent import PPO
-from utils.init_utils import *
 
-def main():
-    args = get_args()
+time_str = str(time())
+log_dir = 'logs/breakout_main_' + time_str
+# model_dir = 'save_model/mpe_main_' + time_str
+# os.mkdir(model_dir)
 
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
 
-    if args.cuda and torch.cuda.is_available() and args.cuda_deterministic:
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
-
-    log_dir = os.path.expanduser(args.log_dir)
-    eval_log_dir = log_dir + "_eval"
-
-    torch.set_num_threads(1)
-    device = torch.device("cuda:0" if args.cuda else "cpu")
-
-    # envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
-    #                      args.gamma, args.log_dir, device, False)
-
-    # envs = gym.make("BreakoutNoFrameskip-v4")
-    envs = make_atari("BreakoutNoFrameskip-v4")
-    envs = wrap_deepmind(envs)
-
-    actor_critic = Policy(
-        envs.observation_space.shape,
-        envs.action_space,
-        base_kwargs={'recurrent': args.recurrent_policy})
-    actor_critic.to(device)
-    
-    agent = PPO(
-        actor_critic,
-        args.clip_param,
-        args.ppo_epoch,
-        args.num_mini_batch,
-        args.value_loss_coef,
-        args.entropy_coef,
-        lr=args.lr,
-        eps=args.eps,
-        max_grad_norm=args.max_grad_norm)
-
-    rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                              envs.observation_space.shape, envs.action_space,
-                              actor_critic.recurrent_hidden_state_size)
-
-    obs = envs.reset()
-    rollouts.obs[0].copy_(torch.tensor(obs))
-    rollouts.to(device)
-
-    episode_rewards = deque(maxlen=10)
-
-    start = time.time()
-    num_updates = int(
-        args.num_env_steps) // args.num_steps // args.num_processes
-    for j in range(num_updates):
-
-        if args.use_linear_lr_decay:
-            # decrease learning rate linearly
-            update_linear_schedule(
-                agent.optimizer, j, num_updates,
-                agent.optimizer.lr if args.algo == "acktr" else args.lr)
-
-        for step in range(args.num_steps):
-            # Sample actions
-            with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states = actor_critic.act(
-                    rollouts.obs[step], rollouts.recurrent_hidden_states[step],
-                    rollouts.masks[step])
-
-            # Obser reward and next obs
-            obs, reward, done, infos = envs.step(action)
-
-            for info in infos:
-                if 'episode' in info.keys():
-                    episode_rewards.append(info['episode']['r'])
-
-            # If done then clean the history of observations.
-            masks = torch.FloatTensor(
-                [[0.0] if done_ else [1.0] for done_ in done])
-            bad_masks = torch.FloatTensor(
-                [[0.0] if 'bad_transition' in info.keys() else [1.0]
-                 for info in infos])
-            rollouts.insert(obs, recurrent_hidden_states, action,
-                            action_log_prob, value, reward, masks, bad_masks)
-
-        with torch.no_grad():
-            next_value = actor_critic.get_value(
-                rollouts.obs[-1], rollouts.recurrent_hidden_states[-1],
-                rollouts.masks[-1]).detach()
-
-        rollouts.compute_returns(next_value, args.use_gae, args.gamma,
-                                 args.gae_lambda, args.use_proper_time_limits)
-
-        value_loss, action_loss, dist_entropy = agent.update(rollouts)
-
-        rollouts.after_update()
-
-        # save for every interval-th episode or for the last epoch
-        if (j % args.save_interval == 0
-                or j == num_updates - 1) and args.save_dir != "":
-            save_path = os.path.join(args.save_dir, args.algo)
-            try:
-                os.makedirs(save_path)
-            except OSError:
-                pass
-
-            torch.save([
-                actor_critic,
-                getattr(utils.get_vec_normalize(envs), 'obs_rms', None)
-            ], os.path.join(save_path, args.env_name + ".pt"))
-
-        if j % args.log_interval == 0 and len(episode_rewards) > 1:
-            total_num_steps = (j + 1) * args.num_processes * args.num_steps
-            end = time.time()
-            print(
-                "Updates {}, num timesteps {}, FPS {} \n Last {} training episodes: mean/median reward {:.1f}/{:.1f}, min/max reward {:.1f}/{:.1f}\n"
-                .format(j, total_num_steps,
-                        int(total_num_steps / (end - start)),
-                        len(episode_rewards), np.mean(episode_rewards),
-                        np.median(episode_rewards), np.min(episode_rewards),
-                        np.max(episode_rewards), dist_entropy, value_loss,
-                        action_loss))
+T_horizon = 100
 
 if __name__ == "__main__":
-    main()
+    env = gym.make('BreakoutNoFrameskip-v4')
+    env = make_env(env)
+    agent = PPOCNNAgent(4, action_space=4)
+
+    summary_writer = SummaryWriter(log_dir)
+
+    score = 0.0
+    global_step = 0
+    for i in range(100000):
+        state = env.reset()
+        state = np.asarray(state)
+        state = state.transpose((2, 0, 1))
+        done = False
+        while not done:
+            
+            for t in range(T_horizon):
+                action, action_probs = agent.get_action(state)
+                next_state, reward, done, info = env.step(action)
+                next_state = np.asarray(next_state)
+                next_state = next_state.transpose((2, 0, 1))
+                # print('next_state : {}, action : {}, reward : {}, done : {}, info : {}'.format(next_state, action, reward, done, info))
+
+                agent.save_xp((state, next_state, action, action_probs, reward, done))
+
+                state = next_state
+                score += reward
+                if done:
+                    break
+            
+            pi_loss, value_loss, dist_entropy = agent.train()
+            summary_writer.add_scalar('Loss/pi_loss', pi_loss, global_step)
+            summary_writer.add_scalar('Loss/value_loss', value_loss, global_step)
+            summary_writer.add_scalar('Loss/dist_entropy', dist_entropy, global_step)
+            global_step += 1
+
+            # print('pi_loss : {}, value_loss : {}, dist_entropy : {}'.format(pi_loss, value_loss, dist_entropy))
+        # if i % 10 == 0:
+        summary_writer.add_scalar('Score/EpisodeScore', score, i)
+        # print("{} episode avg score : {:.1f}".format(i+1, score/10))
+        score = 0.0
+
+        env.close()
+
+
+
+
+
