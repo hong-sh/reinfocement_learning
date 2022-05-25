@@ -29,11 +29,13 @@ else:
     print("Device set to : cpu")
 
 class HiPPOCNNAgent(Agent):
-    def __init__(self, num_inputs:int, action_space:int):
+    def __init__(self, num_inputs:int, high_level_action_space:int, low_level_action_space:int,\
+         min_period:int, max_period:int, random_period:bool=False):
         super(HiPPOCNNAgent, self).__init__()
 
         self.num_inputs = num_inputs  
-        self.action_space = action_space
+        self.high_level_action_space = high_level_action_space
+        self.low_level_action_space = low_level_action_space
 
         self.experience_memory = []
 
