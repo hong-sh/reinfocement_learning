@@ -18,6 +18,7 @@ T_horizon = 256
 if __name__ == "__main__":
     env = gym.make('BreakoutNoFrameskip-v4')
     env = make_env(env)
+    env.seed(42)
     agent = PPOCNNAgent(4, action_space=4)
 
     summary_writer = SummaryWriter(log_dir)
@@ -36,6 +37,7 @@ if __name__ == "__main__":
                 action, action_probs = agent.get_action(state)
                 # summary_writer.add_scalar('Episode/action', action, global_step)
                 next_state, reward, done, info = env.step(action)
+                reward += 0.02
                 next_state = np.asarray(next_state)
                 next_state = next_state.transpose((2, 0, 1))
                 # print('next_state : {}, action : {}, reward : {}, done : {}, info : {}'.format(next_state, action, reward, done, info))
