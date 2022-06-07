@@ -50,37 +50,70 @@ class HiPPOCNNAgent(Agent):
         init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
                                constant_(x, 0))
 
-        self.fc_v = init_(nn.Linear(512, 1))
-        self.fc_pi = Categorical(512, action_space)
+        self.fc_high_v = init_(nn.Linear(512, 1))
+        self.fc_high_pi = Categorical(512, high_level_action_space)
+
+        self.fc_low_v = init_(nn.Linear(512+high_level_action_space, 1))
+        self.fc_low_pi = Categorical(512+high_level_action_space, low_level_action_space)
 
         self.to(device)
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
         # self.train()
 
-    def get_v(self, x):
+    def get_high_v(self, x):
         x = F.relu(self.conv1(x / 255.))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.fc(x.view(x.size(0), -1)))
 
-        value = self.fc_v(x)
+        value = self.fc_high_v(x)
         return value, x
 
-    def get_pi(self, x):
-        dist = self.fc_pi(x)
+    def get_low_v(self, x, high_level_action_prob):
+        x = F.relu(self.conv1(x / 255.))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.fc(x.view(x.size(0), -1)))
+        x = torch.concat([x, high_level_action_prob])
+        value = self.fc_low_v(x)
+
+        return value, x
+
+    def get_high_pi(self, x):
+        dist = self.fc_high_pi(x)
         action = dist.sample()
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
         return action, action_log_probs, dist_entropy
 
-    def get_action(self, state):
+    def get_low_pi(self, x):
+        dist = self.fc_high_pi(x)
+        action = dist.sample()
+        action_log_probs = dist.log_probs(action)
+        dist_entropy = dist.entropy().mean()
+        return action, action_log_probs, dist_entropy
+
+    def get_high_action(self, state):
         with torch.no_grad():
             if isinstance(state, np.ndarray):
                 state = torch.from_numpy(state).float().to(device)
                 state = state.unsqueeze(0)
 
-            value, x = self.get_v(state)
+            value, x = self.get_high_v(state)
+            action, action_log_probs, dist_entropy = self.get_pi(x)
+
+        return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
+
+    def get_low_action(self, state, high_level_action):
+        with torch.no_grad():
+            if isinstance(state, np.ndarray):
+                state = torch.from_numpy(state).float().to(device)
+                state = state.unsqueeze(0)
+
+
+
+            value, x = self.get_low_v(state)
             action, action_log_probs, dist_entropy = self.get_pi(x)
 
         return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
