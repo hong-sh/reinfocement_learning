@@ -88,7 +88,7 @@ class HiPPOCNNAgent(Agent):
         return action, action_log_probs, dist_entropy
 
     def get_low_pi(self, x):
-        dist = self.fc_high_pi(x)
+        dist = self.fc_low_pi(x)
         action = dist.sample()
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
@@ -101,27 +101,32 @@ class HiPPOCNNAgent(Agent):
                 state = state.unsqueeze(0)
 
             value, x = self.get_high_v(state)
-            action, action_log_probs, dist_entropy = self.get_pi(x)
+            action, action_log_probs, dist_entropy = self.get_high_pi(x)
 
         return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
 
-    def get_low_action(self, state, high_level_action):
+    def get_low_action(self, state, high_level_action_prob):
         with torch.no_grad():
             if isinstance(state, np.ndarray):
                 state = torch.from_numpy(state).float().to(device)
                 state = state.unsqueeze(0)
 
-
-
-            value, x = self.get_low_v(state)
-            action, action_log_probs, dist_entropy = self.get_pi(x)
+            value, x = self.get_low_v(state, high_level_action_prob)
+            action, action_log_probs, dist_entropy = self.get_low_pi(x)
 
         return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
 
-    def evaluate_actions(self, states, actions):
-        value, x = self.get_v(states)
-        dist = self.fc_pi(x)
+    def evaluate_high_actions(self, states, actions):
+        value, x = self.get_high_v(states)
+        dist = self.fc_high_pi(x)
         action_log_probs = dist.log_probs(actions)
+        dist_entropy = dist.entropy().mean()
+        return value, action_log_probs, dist_entropy
+
+    def evaluate_low_actions(self, states, high_actions, low_actions):
+        value, x = self.get_low_v(states, high_actions)
+        dist = self.fc_low_pi(x)
+        action_log_probs = dist.log_probs(low_actions)
         dist_entropy = dist.entropy().mean()
         return value, action_log_probs, dist_entropy
 
