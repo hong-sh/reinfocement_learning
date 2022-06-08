@@ -153,6 +153,8 @@ class HiPPOCNNAgent(Agent):
         self.experience_memory = []
         return state_list, next_state_list, action_list, action_prob_list, reward_list, done_list
 
+
+
     def train(self):
         state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = self.make_batch()
 
