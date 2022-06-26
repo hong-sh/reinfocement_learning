@@ -37,6 +37,15 @@ class HiPPOCNNAgent(Agent):
         self.high_level_action_space = high_level_action_space
         self.low_level_action_space = low_level_action_space
 
+        self.min_period = min_period
+        self.max_period = max_period
+        self.random_period = random_period
+
+        self.periods = np.arange(min_period, max_period + 1)
+        self.curr_period = self.periods[0]
+        self.max_period = max(self.periods)
+        self.average_period = (min_period + max_period) / 2.0 if random_period else min_period
+
         self.experience_memory = []
 
         init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
@@ -134,26 +143,38 @@ class HiPPOCNNAgent(Agent):
         self.experience_memory.append(trajectory)
 
     def make_batch(self):
-        state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = [], [], [], [], [], []
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_state_list, l_next_state_list, \
+            l_action_list, l_action_prob_list, l_reward_list, done_list =\
+                 [], [], [], [], [], [], [], [], [], [], []
         for experience in self.experience_memory:
-            state, next_state, action, action_prob, reward, done = experience
+            state, next_state, h_action, h_action_prob, h_reward,\
+                l_action, l_action_prob, l_reward, done = experience
 
             state_list.append(state)
             next_state_list.append(next_state)
-            action_list.append([action])
-            action_prob_list.append([action_prob])
-            reward_list.append([reward])
+            h_action_list.append([h_action])
+            h_action_prob_list.append([h_action_prob[h_action].item()])
+            h_reward_list.append([h_reward])
+            l_state_list.append(np.concatenate([state, h_action_prob]))
+            l_next_state_list.append(np.concatenate([next_state, h_action_prob]))
+            l_action_list.append([l_action])
+            l_action_prob_list.append([l_action_prob[l_action].item()])
+            l_reward_list.append([l_reward])
             done = 0 if done else 1
             done_list.append([done])
 
-        state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = \
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_action_list, l_action_prob_list, l_reward_list, done_list = \
             torch.tensor(state_list, dtype=torch.float).to(device), torch.tensor(next_state_list, dtype=torch.float).to(device), \
-                torch.tensor(action_list).to(device), torch.tensor(action_prob_list).to(device), torch.tensor(reward_list).to(device), torch.tensor(done_list, dtype=torch.float).to(device)
+                torch.tensor(h_action_list).to(device), torch.tensor(h_action_prob_list).to(device), torch.tensor(h_reward_list).to(device), \
+                    torch.tensor(l_state_list).to(device), torch.tensor(l_next_state_list).to(device), \
+                        torch.tensor(l_action_list).to(device), torch.tensor(l_action_prob_list).to(device), torch.tensor(l_reward_list).to(device), \
+                            torch.tensor(done_list, dtype=torch.float).to(device)
         
         self.experience_memory = []
-        return state_list, next_state_list, action_list, action_prob_list, reward_list, done_list
-
-
+        return state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_state_list, l_next_state_list, l_action_list, l_action_prob_list, l_reward_list, done_list
 
     def train(self):
         state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = self.make_batch()
