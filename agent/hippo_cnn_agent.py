@@ -132,8 +132,8 @@ class HiPPOCNNAgent(Agent):
         dist_entropy = dist.entropy().mean()
         return value, action_log_probs, dist_entropy
 
-    def evaluate_low_actions(self, states, high_actions, low_actions):
-        value, x = self.get_low_v(states, high_actions)
+    def evaluate_low_actions(self, states, high_action_probs, low_actions):
+        value, x = self.get_low_v(states, high_action_probs)
         dist = self.fc_low_pi(x)
         action_log_probs = dist.log_probs(low_actions)
         dist_entropy = dist.entropy().mean()
@@ -144,9 +144,9 @@ class HiPPOCNNAgent(Agent):
 
     def make_batch(self):
         state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
-            l_state_list, l_next_state_list, \
             l_action_list, l_action_prob_list, l_reward_list, done_list =\
-                 [], [], [], [], [], [], [], [], [], [], []
+                 [], [], [], [], [], [], [], [], []
+
         for experience in self.experience_memory:
             state, next_state, h_action, h_action_prob, h_reward,\
                 l_action, l_action_prob, l_reward, done = experience
@@ -156,8 +156,6 @@ class HiPPOCNNAgent(Agent):
             h_action_list.append([h_action])
             h_action_prob_list.append([h_action_prob[h_action].item()])
             h_reward_list.append([h_reward])
-            l_state_list.append(np.concatenate([state, h_action_prob]))
-            l_next_state_list.append(np.concatenate([next_state, h_action_prob]))
             l_action_list.append([l_action])
             l_action_prob_list.append([l_action_prob[l_action].item()])
             l_reward_list.append([l_reward])
@@ -168,75 +166,133 @@ class HiPPOCNNAgent(Agent):
             l_action_list, l_action_prob_list, l_reward_list, done_list = \
             torch.tensor(state_list, dtype=torch.float).to(device), torch.tensor(next_state_list, dtype=torch.float).to(device), \
                 torch.tensor(h_action_list).to(device), torch.tensor(h_action_prob_list).to(device), torch.tensor(h_reward_list).to(device), \
-                    torch.tensor(l_state_list).to(device), torch.tensor(l_next_state_list).to(device), \
                         torch.tensor(l_action_list).to(device), torch.tensor(l_action_prob_list).to(device), torch.tensor(l_reward_list).to(device), \
                             torch.tensor(done_list, dtype=torch.float).to(device)
         
         self.experience_memory = []
         return state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
-            l_state_list, l_next_state_list, l_action_list, l_action_prob_list, l_reward_list, done_list
+            l_action_list, l_action_prob_list, l_reward_list, done_list
 
     def train(self):
-        state_list, next_state_list, action_list, action_prob_list, reward_list, done_list = self.make_batch()
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+            l_action_list, l_action_prob_list, l_reward_list, done_list = self.make_batch()
 
-        pi_loss_mean, value_loss_mean, dist_entropy_mean = 0.0, 0.0, 0.0
-        approx_kl_mean, approx_ent_mean, clipfrac_mean = 0.0, 0.0, 0.0
+        h_pi_loss_mean, h_value_loss_mean, h_dist_entropy_mean = 0.0, 0.0, 0.0
+        l_pi_loss_mean, l_value_loss_mean, l_dist_entropy_mean = 0.0, 0.0, 0.0
+        h_approx_kl_mean, h_approx_ent_mean, h_clipfrac_mean = 0.0, 0.0, 0.0
+        l_approx_kl_mean, l_approx_ent_mean, l_clipfrac_mean = 0.0, 0.0, 0.0
 
         for _ in range(K_epoch):
-            value_next, _ = self.get_v(next_state_list)
-            value, action_log_probs, dist_entropy = self.evaluate_actions(state_list, action_list)
+            # high level policy update
+            h_value_next, _ = self.get_high_v(next_state_list)
+            h_value, h_action_log_probs, h_dist_entropy = self.evaluate_high_actions(state_list, h_action_list)
 
-            td_target = reward_list + gamma * value_next * done_list
-            delta = td_target - value
-            delta = delta.detach().cpu().numpy()
+            h_td_target = h_reward_list + gamma * h_value_next * done_list
+            h_delta = h_td_target - h_value
+            h_delta = h_delta.detach().cpu().numpy()
 
-            advantage_list = []
-            advantage = 0.0
-            for delta_t in delta[::-1]:
-                advantage = gamma * lmbda * advantage + delta_t[0]
-                advantage_list.append([advantage])
-            advantage_list.reverse()
-            advantage_list = torch.tensor(advantage_list, dtype=torch.float).to(device)
+            h_advantage_list = []
+            h_advantage = 0.0
+            for delta_t in h_delta[::-1]:
+                h_advantage = gamma * lmbda * h_advantage + delta_t[0]
+                h_advantage_list.append([h_advantage])
+            h_advantage_list.reverse()
+            h_advantage_list = torch.tensor(h_advantage_list, dtype=torch.float).to(device)
 
-            ratio_list = torch.exp(action_log_probs - action_prob_list).to(device)
+            h_ratio_list = torch.exp(h_action_log_probs - h_action_prob_list).to(device)
 
-            surr1 = ratio_list * advantage_list
-            surr2 = torch.clamp(ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * advantage_list
-            pi_loss = -torch.min(surr1, surr2).mean()
+            h_surr1 = h_ratio_list * h_advantage_list
+            h_surr2 = torch.clamp(h_ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * h_advantage_list
+            h_pi_loss = -torch.min(h_surr1, h_surr2).mean()
 
-            value_pred_clipped = value_next + (value - value_next).clamp(-value_clip, value_clip)
-            td_target = td_target.detach()
-            value_losses = (value - td_target).pow(2)
-            value_losses_clipped = (value_pred_clipped - td_target).pow(2)
-            value_loss = 0.5 * torch.max(value_losses, value_losses_clipped).mean()
+            h_value_pred_clipped = h_value_next + (h_value - h_value_next).clamp(-value_clip, value_clip)
+            h_td_target = h_td_target.detach()
+            h_value_losses = (h_value - h_td_target).pow(2)
+            h_value_losses_clipped = (h_value_pred_clipped - h_td_target).pow(2)
+            h_value_loss = 0.5 * torch.max(h_value_losses, h_value_losses_clipped).mean()
+
+            # low level policy update
+            l_value_next, _ = self.get_low_v(next_state_list, h_action_prob_list)
+            l_value, l_action_log_probs, l_dist_entropy = self.evaluate_low_actions(state_list, h_action_prob_list, l_action_list)
+
+            l_td_target = l_reward_list + gamma * l_value_next * done_list
+            l_delta = l_td_target - l_value
+            l_delta = l_delta.detach().cpu().numpy()
+
+            l_advantage_list = []
+            l_advantage = 0.0
+            for delta_t in l_delta[::-1]:
+                l_advantage = gamma * lmbda * l_advantage + delta_t[0]
+                l_advantage_list.append([l_advantage])
+            l_advantage_list.reverse()
+            l_advantage_list = torch.tensor(l_advantage_list, dtype=torch.float).to(device)
+
+            l_ratio_list = torch.exp(l_action_log_probs - l_action_prob_list).to(device)
+
+            l_surr1 = l_ratio_list * l_advantage_list
+            l_surr2 = torch.clamp(l_ratio_list, 1 - eps_clip, 1 + eps_clip).to(device) * l_advantage_list
+            l_pi_loss = -torch.min(l_surr1, l_surr2).mean()
+
+            l_value_pred_clipped = l_value_next + (l_value - l_value_next).clamp(-value_clip, value_clip)
+            l_td_target = l_td_target.detach()
+            l_value_losses = (l_value - l_td_target).pow(2)
+            l_value_losses_clipped = (l_value_pred_clipped - l_td_target).pow(2)
+            l_value_loss = 0.5 * torch.max(l_value_losses, l_value_losses_clipped).mean()
+
+            h_loss = h_value_loss * value_loss_coef + h_pi_loss - h_dist_entropy * entropy_coef
+            l_loss = l_value_loss * value_loss_coef + l_pi_loss - l_dist_entropy * entropy_coef
+            total_loss = h_loss / self.average_period + l_loss
 
             self.optimizer.zero_grad()
-            (value_loss * value_loss_coef + pi_loss - dist_entropy * entropy_coef).backward()
+            total_loss.backward()
             nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
             self.optimizer.step()
 
-            pi_loss_mean += pi_loss.item()
-            value_loss_mean += value_loss.item()
-            dist_entropy_mean += dist_entropy.item()
+            h_pi_loss_mean += h_pi_loss.item()
+            h_value_loss_mean += h_value_loss.item()
+            h_dist_entropy_mean += h_dist_entropy.item()
 
-            approx_kl = ratio_list.mean()
-            approx_ent = (-action_prob_list).mean()
-            clipped = torch.where(torch.abs(ratio_list - 1.0) > eps_clip)
-            clipfrac = len(clipped) / len(ratio_list)
+            l_pi_loss_mean += l_pi_loss.item()
+            l_value_loss_mean += l_value_loss.item()
+            l_dist_entropy_mean += l_dist_entropy.item()
 
-            approx_kl_mean += approx_kl
-            approx_ent_mean += approx_ent
-            clipfrac_mean += clipfrac
+            h_approx_kl = h_ratio_list.mean()
+            h_approx_ent = (-h_action_prob_list).mean()
+            h_clipped = torch.where(torch.abs(h_ratio_list - 1.0) > eps_clip)
+            h_clipfrac = len(h_clipped) / len(h_ratio_list)
 
-        pi_loss_mean /= K_epoch
-        value_loss_mean /= K_epoch
-        dist_entropy_mean /= K_epoch
+            l_approx_kl = l_ratio_list.mean()
+            l_approx_ent = (-l_action_prob_list).mean()
+            l_clipped = torch.where(torch.abs(l_ratio_list - 1.0) > eps_clip)
+            l_clipfrac = len(l_clipped) / len(l_ratio_list)
 
-        approx_kl_mean /= K_epoch
-        approx_ent_mean /= K_epoch
-        clipfrac_mean /= K_epoch
+            h_approx_kl_mean += h_approx_kl
+            h_approx_ent_mean += h_approx_ent
+            h_clipfrac_mean += h_clipfrac
 
-        return pi_loss_mean, value_loss_mean, dist_entropy_mean, approx_kl_mean, approx_ent_mean, clipfrac_mean
+            l_approx_kl_mean += l_approx_kl
+            l_approx_ent_mean += l_approx_ent
+            l_clipfrac_mean += l_clipfrac
+
+
+        h_pi_loss_mean /= K_epoch
+        h_value_loss_mean /= K_epoch
+        h_dist_entropy_mean /= K_epoch
+
+        h_approx_kl_mean /= K_epoch
+        h_approx_ent_mean /= K_epoch
+        h_clipfrac_mean /= K_epoch
+
+        l_pi_loss_mean /= K_epoch
+        l_value_loss_mean /= K_epoch
+        l_dist_entropy_mean /= K_epoch
+
+        l_approx_kl_mean /= K_epoch
+        l_approx_ent_mean /= K_epoch
+        l_clipfrac_mean /= K_epoch
+
+        return h_pi_loss_mean, h_value_loss_mean, h_dist_entropy_mean, h_approx_kl_mean, h_approx_ent_mean, h_clipfrac_mean, \
+            l_pi_loss_mean, l_value_loss_mean, l_dist_entropy_mean, l_approx_kl_mean, l_approx_ent_mean, l_clipfrac_mean
 
     def save_model(self, save_dir:str):
         pass
