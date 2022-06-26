@@ -70,6 +70,12 @@ class HiPPOCNNAgent(Agent):
 
         # self.train()
 
+    def reset_count(self):
+        self.count = 0
+
+    def get_random_period(self):
+        return self.periods[np.random.choice(len(self.periods))]
+
     def get_high_v(self, x):
         x = F.relu(self.conv1(x / 255.))
         x = F.relu(self.conv2(x))
@@ -79,12 +85,12 @@ class HiPPOCNNAgent(Agent):
         value = self.fc_high_v(x)
         return value, x
 
-    def get_low_v(self, x, high_level_action_prob):
+    def get_low_v(self, x, high_level_action_logits):
         x = F.relu(self.conv1(x / 255.))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.fc(x.view(x.size(0), -1)))
-        x = torch.concat([x, high_level_action_prob])
+        x = torch.concat([x, high_level_action_logits], dim=1)
         value = self.fc_low_v(x)
 
         return value, x
@@ -92,9 +98,9 @@ class HiPPOCNNAgent(Agent):
     def get_high_pi(self, x):
         dist = self.fc_high_pi(x)
         action = dist.sample()
-        action_log_probs = dist.log_probs(action)
+        action_log_probs = dist.log_probs(dist.sample())
         dist_entropy = dist.entropy().mean()
-        return action, action_log_probs, dist_entropy
+        return action, action_log_probs, dist_entropy, dist.logits
 
     def get_low_pi(self, x):
         dist = self.fc_low_pi(x)
@@ -110,20 +116,35 @@ class HiPPOCNNAgent(Agent):
                 state = state.unsqueeze(0)
 
             value, x = self.get_high_v(state)
-            action, action_log_probs, dist_entropy = self.get_high_pi(x)
+            action, action_log_probs, dist_entropy, dist_logits = self.get_high_pi(x)
 
-        return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
+        return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0], dist_logits.detach()
 
-    def get_low_action(self, state, high_level_action_prob):
+    def get_low_action(self, state, high_level_action_logits):
         with torch.no_grad():
             if isinstance(state, np.ndarray):
                 state = torch.from_numpy(state).float().to(device)
                 state = state.unsqueeze(0)
 
-            value, x = self.get_low_v(state, high_level_action_prob)
+            value, x = self.get_low_v(state, high_level_action_logits)
             action, action_log_probs, dist_entropy = self.get_low_pi(x)
 
         return action.view(-1).detach().numpy()[0], action_log_probs.view(-1).detach().numpy()[0]
+
+    def get_action(self, state:object):
+        if self.count % self.curr_period == 0:
+            if self.random_period:
+                self.curr_period = self.get_random_period()
+            time_remaining = (self.curr_period - self.count) / self.curr_period
+            high_level_action, high_level_action_prob, high_level_action_logits = self.get_high_action(state)
+            self.curr_high_level_action = high_level_action
+            self.curr_high_level_action_prob = high_level_action_prob
+            self.curr_high_level_action_logits = high_level_action_logits
+
+        self.count = (self.count + 1) % self.curr_period
+        low_level_action, low_level_action_prob = self.get_low_action(state, self.curr_high_level_action_logits)
+        return self.curr_high_level_action, self.curr_high_level_action_prob, self.curr_high_level_action_logits.view(-1).detach().numpy(), \
+            low_level_action, low_level_action_prob
 
     def evaluate_high_actions(self, states, actions):
         value, x = self.get_high_v(states)
@@ -132,8 +153,8 @@ class HiPPOCNNAgent(Agent):
         dist_entropy = dist.entropy().mean()
         return value, action_log_probs, dist_entropy
 
-    def evaluate_low_actions(self, states, high_action_probs, low_actions):
-        value, x = self.get_low_v(states, high_action_probs)
+    def evaluate_low_actions(self, states, high_action_logits, low_actions):
+        value, x = self.get_low_v(states, high_action_logits)
         dist = self.fc_low_pi(x)
         action_log_probs = dist.log_probs(low_actions)
         dist_entropy = dist.entropy().mean()
@@ -143,38 +164,39 @@ class HiPPOCNNAgent(Agent):
         self.experience_memory.append(trajectory)
 
     def make_batch(self):
-        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_action_logits_list, h_reward_list, \
             l_action_list, l_action_prob_list, l_reward_list, done_list =\
-                 [], [], [], [], [], [], [], [], []
+                 [], [], [], [], [], [], [], [], [], []
 
         for experience in self.experience_memory:
-            state, next_state, h_action, h_action_prob, h_reward,\
+            state, next_state, h_action, h_action_prob, h_action_logits, h_reward,\
                 l_action, l_action_prob, l_reward, done = experience
 
             state_list.append(state)
             next_state_list.append(next_state)
             h_action_list.append([h_action])
-            h_action_prob_list.append([h_action_prob[h_action].item()])
+            h_action_prob_list.append([h_action_prob])
+            h_action_logits_list.append(h_action_logits)
             h_reward_list.append([h_reward])
             l_action_list.append([l_action])
-            l_action_prob_list.append([l_action_prob[l_action].item()])
+            l_action_prob_list.append([l_action_prob])
             l_reward_list.append([l_reward])
             done = 0 if done else 1
             done_list.append([done])
 
-        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_action_logits_list, h_reward_list, \
             l_action_list, l_action_prob_list, l_reward_list, done_list = \
             torch.tensor(state_list, dtype=torch.float).to(device), torch.tensor(next_state_list, dtype=torch.float).to(device), \
-                torch.tensor(h_action_list).to(device), torch.tensor(h_action_prob_list).to(device), torch.tensor(h_reward_list).to(device), \
+                torch.tensor(h_action_list).to(device), torch.tensor(h_action_prob_list).to(device), torch.tensor(h_action_logits_list).to(device), torch.tensor(h_reward_list).to(device), \
                         torch.tensor(l_action_list).to(device), torch.tensor(l_action_prob_list).to(device), torch.tensor(l_reward_list).to(device), \
                             torch.tensor(done_list, dtype=torch.float).to(device)
         
         self.experience_memory = []
-        return state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+        return state_list, next_state_list, h_action_list, h_action_prob_list, h_action_logits_list, h_reward_list, \
             l_action_list, l_action_prob_list, l_reward_list, done_list
 
     def train(self):
-        state_list, next_state_list, h_action_list, h_action_prob_list, h_reward_list, \
+        state_list, next_state_list, h_action_list, h_action_prob_list, h_action_logits_list, h_reward_list, \
             l_action_list, l_action_prob_list, l_reward_list, done_list = self.make_batch()
 
         h_pi_loss_mean, h_value_loss_mean, h_dist_entropy_mean = 0.0, 0.0, 0.0
@@ -212,8 +234,8 @@ class HiPPOCNNAgent(Agent):
             h_value_loss = 0.5 * torch.max(h_value_losses, h_value_losses_clipped).mean()
 
             # low level policy update
-            l_value_next, _ = self.get_low_v(next_state_list, h_action_prob_list)
-            l_value, l_action_log_probs, l_dist_entropy = self.evaluate_low_actions(state_list, h_action_prob_list, l_action_list)
+            l_value_next, _ = self.get_low_v(next_state_list, h_action_logits_list)
+            l_value, l_action_log_probs, l_dist_entropy = self.evaluate_low_actions(state_list, h_action_logits_list, l_action_list)
 
             l_td_target = l_reward_list + gamma * l_value_next * done_list
             l_delta = l_td_target - l_value
