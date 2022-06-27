@@ -15,8 +15,22 @@ log_dir = 'logs/breakout_hippo_main_' + time_str
 
 T_horizon = 256
 
-def calculate_low_level_reward():
-    pass
+def get_stick_loc(state):
+    stick_color= state[191, 152]
+    stick_bound = state[191, 8:152]
+    stick_center = np.where(stick_bound==stick_color)[0][0] + 8
+    left = stick_center / 144
+    return left
+
+def calculate_low_level_reward(state,next_state, h_action, h_action_logits):
+    l_reward = 0.0
+    left = get_stick_loc(next_state)
+    if  h_action_logits[0]  * 1.2 >= left and h_action_logits[1] * 0.8 <= left:
+        l_reward = 0.5
+    else:
+        l_reward = -0.5 * abs(h_action_logits[0]  - left)
+
+    return l_rewards
 
 if __name__ == "__main__":
     env = gym.make('BreakoutNoFrameskip-v4')
@@ -45,7 +59,7 @@ if __name__ == "__main__":
                 next_state, reward, done, info = env.step(l_action)
 
                 h_reward = reward + 0.02
-                l_reward = reward + 0.02 #calculate_low_level_reward()
+                l_reward = reward = calculate_low_level_reward(state, next_state, h_action, h_action_logits)
                 next_state = np.asarray(next_state)
                 next_state = next_state.transpose((2, 0, 1))
                 # print('next_state : {}, action : {}, reward : {}, done : {}, info : {}'.format(next_state, action, reward, done, info))
