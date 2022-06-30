@@ -22,15 +22,15 @@ def get_stick_loc(state):
     left = stick_center / 144
     return left
 
-def calculate_low_level_reward(state,next_state, h_action, h_action_logits):
+def calculate_low_level_reward(next_state, h_action_logits):
     l_reward = 0.0
     left = get_stick_loc(next_state)
     if  h_action_logits[0]  * 1.2 >= left and h_action_logits[1] * 0.8 <= left:
-        l_reward = 0.5
+        l_reward = 0.01
     else:
-        l_reward = -0.5 * abs(h_action_logits[0]  - left)
+        l_reward = -0.01 * abs(h_action_logits[0]  - left)
 
-    return l_rewards
+    return l_reward
 
 if __name__ == "__main__":
     env = gym.make('BreakoutNoFrameskip-v4')
@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     score = 0.0
     global_step = 0
-    for i in range(100000):
+    for i in range(10000000000):
         hippo_agent.reset_count()
         state = env.reset()
         state = np.asarray(state)
@@ -58,14 +58,14 @@ if __name__ == "__main__":
                 # summary_writer.add_scalar('Episode/action', action, global_step)
                 next_state, reward, done, info = env.step(l_action)
 
-                h_reward = reward + 0.02
-                l_reward = reward = calculate_low_level_reward(state, next_state, h_action, h_action_logits)
+                h_reward = reward + 0.01
+                l_reward = reward = calculate_low_level_reward(env.metadata["original_frame"], h_action_logits)
                 next_state = np.asarray(next_state)
                 next_state = next_state.transpose((2, 0, 1))
                 # print('next_state : {}, action : {}, reward : {}, done : {}, info : {}'.format(next_state, action, reward, done, info))
 
                 hippo_agent.save_xp((state, next_state, h_action, h_action_probs, h_action_logits, h_reward, l_action, l_action_probs, l_reward, done))
-
+                
                 state = next_state
                 score += reward
                 local_step += 1

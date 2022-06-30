@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     score = 0.0
     global_step = 0
-    for i in range(100000):
+    for i in range(10000000000):
         state = env.reset()
         state = np.asarray(state)
         state = state.transpose((2, 0, 1))
